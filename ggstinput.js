@@ -48,6 +48,10 @@ class GGSTTime {
         this.frames = 0
         this.start_msec = 0
     }
+
+    next_frame_msec() {
+        return this.start_msec + Math.ceil(( this.frames + 1 ) * 1000 / 60)
+    }
 }
 
 class GGSTKey {
@@ -100,6 +104,13 @@ class GGSTPad {
     register_key(key) {
         this.type2key[key.type] = key
         this.key2key[key.key] = key
+    }
+
+    has_unreleased_downlocks() {
+        for(key of this.type2key)
+            if(1 == key.downlock && GGSTKeyState.UP == key.state)
+                return true
+        return false
     }
 
     down_unlock() {
@@ -169,28 +180,50 @@ class InputSeries {
         this.time = time
     }
 
-    update(key, updown, msec) {
-        let diff_frames = this.time.update_msec(msec)
+    get_text() {
+        return this.text + frame_text(this.last_diff_frames) + this.last_cmd
+    }
 
+    update_downlock(msec) {
+        let next_frame_msec = this.time.next_frame_msec()
+        if(msec >= next_frame_msec){
+            let has_unreleased_downlocks = this.pad.has_unreleased_downlocks()
+            this.pad.down_unlock()
+            if(has_unreleased_downlocks){
+                this.time.update_msec(next_frame_msec)
+                this.text += frame_text(this.last_diff_frames) + this.last_cmd
+                this.last_cmd = ''
+                this.last_diff_frames = 1
+                this.last_cmd = this.pad.get_direction() + this.pad.get_act()
+            }
+        }
+    }
+
+    update(key, updown, msec) {
         switch(updown){
             case GGSTKeyState.DOWN:
-                if(!key.is_down())
-                    key.down()
+                if(key.is_down())
+                    return this.get_text()
+                this.update_downlock(msec)
+                key.down()
                 break
             case GGSTKeyState.UP:
+                this.update_downlock(msec)
                 key.up()
                 break
+            default:
+                return this.get_text()
         }
+        let diff_frames = this.time.update_msec(msec)
 
         if(diff_frames > 0){
-            this.pad.down_unlock()
             this.text += frame_text(this.last_diff_frames) + this.last_cmd
             this.last_cmd = ''
             this.last_diff_frames = diff_frames
         }
         this.last_cmd = this.pad.get_direction() + this.pad.get_act()
 
-        return this.text + frame_text(this.last_diff_frames) + this.last_cmd
+        return this.get_text()
     }
 
     clear() {
